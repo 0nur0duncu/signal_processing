@@ -18,20 +18,30 @@ mutlu_filtrelenmis = filter(filtre_b, filtre_a, mutlu_ses);
 notr_filtrelenmis = filter(filtre_b, filtre_a, notr_ses);
 saskin_filtrelenmis = filter(filtre_b, filtre_a, saskin_ses);
 
-% FFT analizi için fonksiyon
-% Bu fonksiyon sinyalin frekans spektrumunu hesaplar
-function [frekans, genlik] = spektrum_analizi(sinyal, fs)
-    Y = fft(sinyal);
-    n = length(sinyal);
-    frekans = (0:n-1)*(fs/n);
-    genlik = abs(Y)/n;
-end
+% Her duygu için FFT analizi
+% Öfkeli ses için FFT
+Y_ofkeli = fft(ofkeli_filtrelenmis);
+n_ofkeli = length(ofkeli_filtrelenmis);
+ofkeli_f = (0:n_ofkeli-1)*(ofkeli_fs/n_ofkeli);
+ofkeli_genlik = abs(Y_ofkeli)/n_ofkeli;
 
-% Her duygu için spektrum analizi yapılır
-[ofkeli_f, ofkeli_genlik] = spektrum_analizi(ofkeli_filtrelenmis, ofkeli_fs);
-[mutlu_f, mutlu_genlik] = spektrum_analizi(mutlu_filtrelenmis, mutlu_fs);
-[notr_f, notr_genlik] = spektrum_analizi(notr_filtrelenmis, notr_fs);
-[saskin_f, saskin_genlik] = spektrum_analizi(saskin_filtrelenmis, saskin_fs);
+% Mutlu ses için FFT
+Y_mutlu = fft(mutlu_filtrelenmis);
+n_mutlu = length(mutlu_filtrelenmis);
+mutlu_f = (0:n_mutlu-1)*(mutlu_fs/n_mutlu);
+mutlu_genlik = abs(Y_mutlu)/n_mutlu;
+
+% Nötr ses için FFT
+Y_notr = fft(notr_filtrelenmis);
+n_notr = length(notr_filtrelenmis);
+notr_f = (0:n_notr-1)*(notr_fs/n_notr);
+notr_genlik = abs(Y_notr)/n_notr;
+
+% Şaşkın ses için FFT
+Y_saskin = fft(saskin_filtrelenmis);
+n_saskin = length(saskin_filtrelenmis);
+saskin_f = (0:n_saskin-1)*(saskin_fs/n_saskin);
+saskin_genlik = abs(Y_saskin)/n_saskin;
 
 % Grafikleri çizme
 figure('Name', 'Duygu Analizi');

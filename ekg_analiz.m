@@ -1,66 +1,113 @@
-% Veri okuma parametreleri
-dosya_adi = './mit-bih-arrhythmia-database-1.0.0/100.dat';  % MIT-BIH veritabanından örnek kayıt
-ornekleme_frekansi = 360;  % Örnekleme frekansı (Hz) - MIT-BIH için standart
-veri_uzunlugu = 3600;  % 10 saniyelik veri
+% 1. ADIM: Veri Okuma
+% MIT-BIH veri tabanından EKG verisini oku
+dosya_adi = './mit-bih-arrhythmia-database-1.0.0/101.dat';
+dosya = fopen(dosya_adi, 'r');
+if dosya == -1
+    error('Dosya açılamadı. Lütfen dosya yolunu kontrol edin.');
+end
 
-% Veriyi oku (wfdb toolbox gerekli)
-[sinyal,~,~] = rdsamp(dosya_adi, 1, veri_uzunlugu);
+% Binary formatında veriyi oku (16-bit tamsayı olarak)
+ham_sinyal = fread(dosya, inf, 'int16');
+fclose(dosya);
 
-% Adım 1: Butterworth bant geçiren filtre tasarımı (0.5-40 Hz)
-filtre_derecesi = 4;  % Filtre derecesi
-kesme_frekanslari = [0.5 40]/(ornekleme_frekansi/2);  % Normalize edilmiş kesme frekansları
-[b, a] = butter(filtre_derecesi, kesme_frekanslari, 'bandpass');
+% 2. ADIM: Sinyal Parametrelerini Ayarla
+ornekleme_frekansi = 360; % MIT-BIH için standart örnekleme frekansı (Hz)
+ham_sinyal = ham_sinyal(1:3600); % İlk 10 saniyelik veriyi al (360 Hz * 10 sn = 3600 örnek)
+zaman = (0:length(ham_sinyal)-1)/ornekleme_frekansi; % Zaman vektörü (saniye)
 
-% Adım 2: Sinyali filtreleme
-filtrelenmis_sinyal = filtfilt(b, a, sinyal);
+% 3. ADIM: Butterworth Alçak Geçiren Filtre Tasarımı
+kesme_frekansi = 40; % Kesme frekansı (Hz)
+normalize_kesme = kesme_frekansi/(ornekleme_frekansi/2); % Normalize edilmiş kesme frekansı
+[filtre_b, filtre_a] = butter(4, normalize_kesme, 'low'); % 4. dereceden alçak geçiren filtre
 
-% Adım 3: FFT (Hızlı Fourier Dönüşümü) analizi
-fft_sonuc = fft(filtrelenmis_sinyal);
-frekanslar = (0:length(fft_sonuc)-1)*(ornekleme_frekansi/length(fft_sonuc));
-guc_spektrumu = abs(fft_sonuc/length(fft_sonuc));
-guc_spektrumu_yarim = guc_spektrumu(1:floor(length(fft_sonuc)/2+1));
-frekanslar = frekanslar(1:floor(length(fft_sonuc)/2+1));
+% 4. ADIM: Filtreleme İşlemi
+filtreli_sinyal = filter(filtre_b, filtre_a, ham_sinyal);
 
-% Adım 4: R-tepe noktalarının tespiti
-pencere_boyutu = 30;  % Pencere boyutu
-esik_degeri = 0.6;  % Eşik değeri
-[~, r_tepeleri] = findpeaks(filtrelenmis_sinyal, 'MinPeakHeight', esik_degeri*max(filtrelenmis_sinyal), ...
-                        'MinPeakDistance', pencere_boyutu);
+% 5. ADIM: R-Peak Tespiti
+pencere_ms = 200; % 200 ms'lik pencere
+pencere_ornekleri = round(pencere_ms * ornekleme_frekansi / 1000); % Pencere örnek sayısı
+esik_degeri = 0.6 * max(filtreli_sinyal); % Maksimum genliğin %60'ı
 
-% Adım 5: Kalp ritmi hesaplama
-rr_araliklari = diff(r_tepeleri)/ornekleme_frekansi;  % R-R aralıkları (saniye)
-kalp_atisi = 60./rr_araliklari;  % Kalp atış hızı (bpm)
-ortalama_kalp_atisi = mean(kalp_atisi);
+% R-peak konumlarını bul
+r_tepeleri = [];
+i = pencere_ornekleri + 1;
+while i <= (length(filtreli_sinyal) - pencere_ornekleri)
+    if filtreli_sinyal(i) > esik_degeri
+        % Pencere içindeki maksimum noktayı bul
+        [~, max_idx] = max(filtreli_sinyal(i-pencere_ornekleri:i+pencere_ornekleri));
+        r_tepeleri = [r_tepeleri; i-pencere_ornekleri+max_idx-1];
+        i = i + pencere_ornekleri; % Bir pencere kadar ilerle
+    else
+        i = i + 1;
+    end
+end
 
-% Adım 6: Grafiklerin çizimi
-figure;
-% 6.1: Orijinal ve filtrelenmiş sinyal karşılaştırması
-subplot(3,1,1);
-plot(sinyal);
+% 6. ADIM: Kalp Ritmi Hesaplama
+if ~isempty(r_tepeleri)
+    rr_araliklari = diff(r_tepeleri)/ornekleme_frekansi; % RR aralıkları (saniye)
+    kalp_ritmi = 60./rr_araliklari; % Dakika başına atım (BPM)
+    ortalama_kalp_ritmi = mean(kalp_ritmi);
+end
+
+% 7. ADIM: Fourier Dönüşümü
+fourier_donusumu = fft(filtreli_sinyal);
+sinyal_uzunlugu = length(filtreli_sinyal);
+frekans_vektoru = (0:sinyal_uzunlugu-1)*(ornekleme_frekansi/sinyal_uzunlugu);
+genlik_spektrumu = abs(fourier_donusumu)/sinyal_uzunlugu;
+
+% 8. ADIM: Görselleştirme
+figure('Position', [200 100 800 600]); % Grafik boyutunu küçülttük
+
+% 8.1 Ham EKG Sinyali
+subplot(4,1,1);
+plot(zaman, ham_sinyal, 'LineWidth', 1);
+title('Ham EKG Sinyali', 'FontSize', 10);
+xlabel('Zaman (saniye)', 'FontSize', 9);
+ylabel('Genlik (mV)', 'FontSize', 9);
+grid on;
+
+% 8.2 Filtrelenmiş EKG Sinyali ve R-Peaks
+subplot(4,1,2);
+plot(zaman, filtreli_sinyal, 'b', 'LineWidth', 1);
 hold on;
-plot(filtrelenmis_sinyal, 'r');
-title('Orijinal ve Filtrelenmiş EKG Sinyali');
-legend('Orijinal', 'Filtrelenmiş');
-xlabel('Örnek Sayısı');
-ylabel('Genlik');
+if ~isempty(r_tepeleri)
+    plot(zaman(r_tepeleri), filtreli_sinyal(r_tepeleri), 'ro', 'MarkerSize', 6);
+end
+title(['Filtrelenmiş EKG Sinyali ve R-Tepeleri (Toplam: ' num2str(length(r_tepeleri)) ' adet)'], 'FontSize', 10);
+xlabel('Zaman (saniye)', 'FontSize', 9);
+ylabel('Genlik (mV)', 'FontSize', 9);
+grid on;
 
-% 6.2: Frekans spektrumu gösterimi
-subplot(3,1,2);
-plot(frekanslar, guc_spektrumu_yarim);
-title('EKG Sinyalinin Frekans Spektrumu');
-xlabel('Frekans (Hz)');
-ylabel('Genlik');
+% 8.3 Kalp Ritmi Grafiği
+subplot(4,1,3);
+if ~isempty(r_tepeleri) && length(r_tepeleri) > 1
+    plot(zaman(r_tepeleri(1:end-1)), kalp_ritmi, 'b.-', 'LineWidth', 1, 'MarkerSize', 6);
+    title(['Kalp Ritmi (Ortalama: ' num2str(round(ortalama_kalp_ritmi)) ' BPM)'], 'FontSize', 10);
+    ylabel('Kalp Ritmi (BPM)', 'FontSize', 9);
+else
+    title('Kalp Ritmi Hesaplanamadı', 'FontSize', 10);
+end
+xlabel('Zaman (saniye)', 'FontSize', 9);
+grid on;
 
-% 6.3: R-tepe noktalarının gösterimi
-subplot(3,1,3);
-plot(filtrelenmis_sinyal);
-hold on;
-plot(r_tepeleri, filtrelenmis_sinyal(r_tepeleri), 'ro');
-title(['R-Tepe Noktaları Tespiti (Ortalama Kalp Ritmi: ' num2str(ortalama_kalp_atisi, '%.1f') ' bpm)']);
-xlabel('Örnek Sayısı');
-ylabel('Genlik');
+% 8.4 Frekans Spektrumu
+subplot(4,1,4);
+plot(frekans_vektoru(1:floor(sinyal_uzunlugu/2)), genlik_spektrumu(1:floor(sinyal_uzunlugu/2)), 'LineWidth', 1);
+title('EKG Sinyalinin Frekans Spektrumu', 'FontSize', 10);
+xlabel('Frekans (Hz)', 'FontSize', 9);
+ylabel('Genlik', 'FontSize', 9);
+grid on;
+xlim([0 50]); % Sadece 0-50 Hz arası frekansları göster
 
-% Adım 7: Sonuçların gösterimi
-fprintf('Ortalama Kalp Ritmi: %.1f bpm\n', ortalama_kalp_atisi);
-fprintf('Minimum Kalp Ritmi: %.1f bpm\n', min(kalp_atisi));
-fprintf('Maksimum Kalp Ritmi: %.1f bpm\n', max(kalp_atisi)); 
+% Grafik düzenini iyileştir
+set(gcf, 'Color', 'white'); % Arka plan rengini beyaz yap
+set(findall(gcf,'type','axes'), 'FontName', 'Arial'); % Font tipini Arial yap
+
+% 9. ADIM: Sonuçları Yazdır
+fprintf('\nAnaliz Sonuçları:\n');
+if ~isempty(r_tepeleri)
+    fprintf('Toplam R-Tepe Sayısı: %d\n', length(r_tepeleri));
+    fprintf('Ortalama Kalp Ritmi: %.1f BPM\n', ortalama_kalp_ritmi);
+    fprintf('Minimum Kalp Ritmi: %.1f BPM\n', min(kalp_ritmi));
+    fprintf('Maksimum Kalp Ritmi: %.1f BPM\n', max(kalp_ritmi));
+end
